@@ -177,6 +177,38 @@ func Test_TestConnection_SufficientPermissions_Success(t *testing.T) {
 	}
 }
 
+func Test_TestConnection_DetectsZstdSupport(t *testing.T) {
+	env := config.GetEnv()
+	cases := []struct {
+		name         string
+		version      tools.MysqlVersion
+		port         string
+		isExpectZstd bool
+	}{
+		{"MySQL 5.7", tools.MysqlVersion57, env.TestMysql57Port, false},
+		{"MySQL 8.0", tools.MysqlVersion80, env.TestMysql80Port, true},
+		{"MySQL 8.4", tools.MysqlVersion84, env.TestMysql84Port, true},
+		{"MySQL 9", tools.MysqlVersion9, env.TestMysql90Port, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			container := connectToMysqlContainer(t, tc.port, tc.version)
+			defer container.DB.Close()
+
+			mysqlModel := createMysqlModel(container)
+			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+			err := mysqlModel.TestConnection(logger, nil, uuid.New())
+			assert.NoError(t, err)
+			assert.Equal(t, tc.isExpectZstd, mysqlModel.IsZstdSupported,
+				"IsZstdSupported mismatch for %s", tc.name)
+		})
+	}
+}
+
 func Test_IsUserReadOnly_AdminUser_ReturnsFalse(t *testing.T) {
 	env := config.GetEnv()
 	cases := []struct {

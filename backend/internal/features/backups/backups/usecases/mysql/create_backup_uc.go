@@ -118,7 +118,7 @@ func (uc *CreateMysqlBackupUsecase) buildMysqldumpArgs(my *mysqltypes.MysqlDatab
 		args = append(args, "--events")
 	}
 
-	args = append(args, uc.getNetworkCompressionArgs(my.Version)...)
+	args = append(args, uc.getNetworkCompressionArgs(my)...)
 
 	if !config.GetEnv().IsCloud {
 		args = append(args, "--max-allowed-packet=1G")
@@ -135,15 +135,21 @@ func (uc *CreateMysqlBackupUsecase) buildMysqldumpArgs(my *mysqltypes.MysqlDatab
 	return args
 }
 
-func (uc *CreateMysqlBackupUsecase) getNetworkCompressionArgs(version tools.MysqlVersion) []string {
+func (uc *CreateMysqlBackupUsecase) getNetworkCompressionArgs(
+	my *mysqltypes.MysqlDatabase,
+) []string {
 	const zstdCompressionLevel = 5
 
-	switch version {
+	switch my.Version {
 	case tools.MysqlVersion80, tools.MysqlVersion84, tools.MysqlVersion9:
-		return []string{
-			"--compression-algorithms=zstd",
-			fmt.Sprintf("--zstd-compression-level=%d", zstdCompressionLevel),
+		if my.IsZstdSupported {
+			return []string{
+				"--compression-algorithms=zstd",
+				fmt.Sprintf("--zstd-compression-level=%d", zstdCompressionLevel),
+			}
 		}
+
+		return []string{"--compress"}
 	case tools.MysqlVersion57:
 		return []string{"--compress"}
 	default:
@@ -585,6 +591,15 @@ func (uc *CreateMysqlBackupUsecase) handleConnectionErrors(stderrStr string) err
 		containsIgnoreCase(stderrStr, "connection refused") {
 		return fmt.Errorf(
 			"MySQL connection refused. Check if the server is running and accessible. stderr: %s",
+			stderrStr,
+		)
+	}
+
+	if containsIgnoreCase(stderrStr, "compression algorithm") ||
+		containsIgnoreCase(stderrStr, "2066") {
+		return fmt.Errorf(
+			"MySQL connection failed due to unsupported compression algorithm. "+
+				"Try re-saving the database connection to re-detect compression support. stderr: %s",
 			stderrStr,
 		)
 	}
